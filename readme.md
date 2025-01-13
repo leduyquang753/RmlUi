@@ -293,8 +293,10 @@ int main(int argc, char** argv)
 
     // Tell RmlUi to load the given fonts.
     Rml::LoadFontFace("LatoLatin-Regular.ttf");
+	// Load a font with an index from a font collection.
+	Rml::LoadFontFace("meiryo.ttc", 2);
     // Fonts can be registered as fallback fonts, as in this case to display emojis.
-    Rml::LoadFontFace("NotoEmoji-Regular.ttf", true);
+    Rml::LoadFontFace("NotoEmoji-Regular.ttf", 0, true);
 
     // Set up data bindings to synchronize application data.
     if (Rml::DataModelConstructor constructor = context->CreateDataModel("animals"))

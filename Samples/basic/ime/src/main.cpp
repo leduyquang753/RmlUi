@@ -55,7 +55,7 @@ static void LoadFonts()
 		font_faces.push_back({path, true});
 
 	for (const FontFace& face : font_faces)
-		Rml::LoadFontFace(face.filename, face.fallback_face);
+		Rml::LoadFontFace(face.filename, 0, face.fallback_face);
 }
 
 int APIENTRY WinMain(HINSTANCE /*instance_handle*/, HINSTANCE /*previous_instance_handle*/, char* /*command_line*/, int /*command_show*/)

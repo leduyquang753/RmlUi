@@ -73,7 +73,7 @@ void Shell::LoadFonts()
 	};
 
 	for (const FontFace& face : font_faces)
-		Rml::LoadFontFace(directory + face.filename, face.fallback_face);
+		Rml::LoadFontFace(directory + face.filename, 0, face.fallback_face);
 }
 
 bool Shell::ProcessKeyDownShortcuts(Rml::Context* context, Rml::Input::KeyIdentifier key, int key_modifier, float native_dp_ratio, bool priority)
