@@ -33,12 +33,8 @@
 
 namespace Rml {
 
-FontFace::FontFace(FontFaceHandleFreetype _face, Style::FontStyle _style, Style::FontWeight _weight)
-{
-	style = _style;
-	weight = _weight;
-	face = _face;
-}
+FontFace::FontFace(FontFaceHandleFreetype face, Style::FontStyle style, Style::FontWeight weight) :
+	style(style), weight(weight), face(face) {}
 
 FontFace::~FontFace()
 {

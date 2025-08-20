@@ -10,6 +10,11 @@
 	- Invalidation is simply done by incrementing the entry's epoch. This is trivially safe.
 */
 
+struct LruListHandle {
+	unsigned index;
+	unsigned epoch;
+};
+
 template<typename T>
 class LruList final {
 	private:
@@ -24,20 +29,15 @@ class LruList final {
 		unsigned headIndex = 0, tailIndex = 0;
 		unsigned currentEpoch = 0;
 	public:
-		struct Handle {
-			unsigned index;
-			unsigned epoch;
-		};
-
 		LruList();
 		void tick();
-		Handle add(T data);
-		bool isAlive(Handle handle);
-		bool ping(Handle handle);
-		void remove(Handle handle);
+		LruListHandle add(T data);
+		bool isAlive(LruListHandle handle);
+		bool ping(LruListHandle handle);
+		void remove(LruListHandle handle);
 		void evictLast();
-		T* getData(Handle handle);
-		const T* getData(Handle handle) const;
+		T* getData(LruListHandle handle);
+		const T* getData(LruListHandle handle) const;
 		T* getLast();
 		const T* getLast() const;
 		unsigned getLastEntryAge() const;
@@ -55,7 +55,7 @@ void LruList<T>::tick() {
 }
 
 template<typename T>
-typename LruList<T>::Handle LruList<T>::add(const T data) {
+typename LruListHandle LruList<T>::add(const T data) {
 	unsigned poolSize = static_cast<unsigned>(pool.size());
 	if (size == poolSize) {
 		poolSize <<= 1;
@@ -87,12 +87,12 @@ typename LruList<T>::Handle LruList<T>::add(const T data) {
 }
 
 template<typename T>
-bool LruList<T>::isAlive(const Handle handle) {
+bool LruList<T>::isAlive(const LruListHandle handle) {
 	return pool[handle.index] == handle.epoch;
 }
 
 template<typename T>
-bool LruList<T>::ping(const Handle handle) {
+bool LruList<T>::ping(const LruListHandle handle) {
 	Entry &entry = pool[handle.index];
 	if (entry.epoch != handle.epoch) return false;
 	if (entry.lastUsed == currentEpoch) return true;
@@ -109,7 +109,7 @@ bool LruList<T>::ping(const Handle handle) {
 }
 
 template<typename T>
-void LruList<T>::remove(const Handle handle) {
+void LruList<T>::remove(const LruListHandle handle) {
 	Entry &entry = pool[handle.index];
 	if (entry.epoch != handle.epoch) return;
 	++entry.epoch;
@@ -144,13 +144,13 @@ void LruList<T>::evictLast() {
 }
 
 template<typename T>
-T* LruList<T>::getData(const Handle handle) {
+T* LruList<T>::getData(const LruListHandle handle) {
 	Entry &entry = pool[handle.index];
 	return entry.epoch == handle.epoch ? &entry.data : nullptr;
 }
 
 template<typename T>
-const T* LruList<T>::getData(const Handle handle) const {
+const T* LruList<T>::getData(const LruListHandle handle) const {
 	Entry &entry = pool[handle.index];
 	return entry.epoch == handle.epoch ? &entry.data : nullptr;
 }

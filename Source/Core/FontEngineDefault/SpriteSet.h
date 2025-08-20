@@ -8,10 +8,10 @@
 namespace Rml {
 
 /**
-    A texture atlas allocator that uses the shelf packing algorithm and supports fast addition and
-    removal of images.
+	A texture atlas allocator that uses the shelf packing algorithm and supports fast addition and
+	removal of images.
 
-    @author Lê Duy Quang
+	@author Lê Duy Quang
 */
 
 // TODO for PR: Give a better name.
@@ -21,16 +21,28 @@ public:
 		unsigned int slot_index;
 		unsigned int epoch;
 	};
-	struct SpriteData {
+	struct SpriteRenderData {
+		unsigned int texture_id;
+		Vector2f u;
+		Vector2f v;
+	};
+	struct SpriteInfo {
 		unsigned int texture_id;
 		unsigned int x;
 		unsigned int y;
 		unsigned int width;
 		unsigned int height;
 	};
+	struct TextureInfo {
+		const unsigned char* texture_data;
+		unsigned int first_dirty_y;
+		unsigned int past_last_dirty_y;
+		unsigned int first_dirty_x;
+		unsigned int past_last_dirty_x;
+	};
 
 	/// Callback for when an image is migrated from one page to another.
-	Function<void(unsigned int, Handle)> migration_callback;
+	//Function<void(unsigned int, Handle)> migration_callback;
 
 	/// @param[in] bytes_per_pixel The number of bytes for each pixel (the pixel format is not needed for operation).
 	/// @param[in] page_size The edge length in pixels of each texture page.
@@ -60,14 +72,26 @@ public:
 	/// @param[in] handle The handle to the image.
 	void Remove(Handle handle);
 
+	bool IsValid(Handle handle) const;
+
 	/// Retrieves information about an image in the texture atlas.
 	/// @param[in] handle The handle to the image.
 	/// @return The information about the image.
-	SpriteData Get(Handle handle) const;
+	SpriteInfo GetInfo(Handle handle) const;
+
+	/// Retrieves render data for an image in the texture atlas, which includes the texture ID and UVs.
+	/// @param[in] handle The handle to the image.
+	/// @return The render data for the image.
+	SpriteRenderData GetRenderData(Handle handle) const;
 
 	/// Retrieves texture data for all pages of the texture atlas.
 	/// @return An array of pointers to each page's texture data.
-	Vector<const unsigned char*> GetTextures() const;
+	Vector<TextureInfo> GetTextures() const;
+
+	int GetTextureSize() const
+	{
+		return page_size;
+	}
 
 private:
 	struct Page {
@@ -108,10 +132,12 @@ private:
 
 	unsigned int bytes_per_pixel;
 	unsigned int page_size;
+	float page_size_float;
 	unsigned int sprite_padding;
 	Vector<Page> page_pool{1 << 3};
 	Vector<Shelf> shelf_pool{1 << 8};
 	Vector<Slot> slot_pool{1 << 10};
+	Vector<SpriteRenderData> render_data_pool{1 << 10}; // Cache to save compute.
 	unsigned int page_count = 0;
 	unsigned int first_page_index = static_cast<unsigned int>(-1);
 	unsigned int last_page_index = 0;
@@ -123,6 +149,7 @@ private:
 	unsigned int Allocate(unsigned int width, unsigned int height);
 	unsigned int TryAllocateInPage(unsigned int page_index, unsigned int width, unsigned int height);
 	unsigned int Remove(unsigned int slot_index);
+	void ComputeRenderDataForSlot(unsigned int slot_index);
 };
 
 } // namespace Rml

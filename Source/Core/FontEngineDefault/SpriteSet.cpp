@@ -50,7 +50,11 @@ namespace {
 
 SpriteSet::SpriteSet(
 	const unsigned int bytes_per_pixel, const unsigned int page_size, const unsigned int sprite_padding
-) : bytes_per_pixel(bytes_per_pixel), page_size(page_size), sprite_padding(sprite_padding)
+) :
+	bytes_per_pixel(bytes_per_pixel),
+	page_size(page_size),
+	page_size_float(static_cast<float>(page_size)),
+	sprite_padding(sprite_padding)
 {
 	InitializePool(page_pool);
 	InitializePool(shelf_pool);
@@ -67,18 +71,18 @@ void SpriteSet::Tick()
 		unsigned int source_shelf_index = source_page.first_shelf_index;
 		while (!shelf_pool[source_shelf_index].allocated)
 			source_shelf_index = shelf_pool[source_shelf_index].next_index;
-		const Shelf& source_shelf = shelf_pool[source_shelf_index];
+		Shelf& source_shelf = shelf_pool[source_shelf_index];
 		unsigned int source_slot_index = source_shelf.first_slot_index;
 		while (!slot_pool[source_slot_index].allocated)
 			source_slot_index = slot_pool[source_slot_index].next_index;
-		const Slot& source_slot = slot_pool[source_slot_index];
+		Slot& source_slot = slot_pool[source_slot_index];
 		const unsigned int destination_slot_index = TryAllocateInPage(
 			first_page_index, source_slot.width, source_slot.height
 		);
 		if (destination_slot_index == null_index)
 			break;
-		const Slot& destination_slot = slot_pool[destination_slot_index];
-		const Shelf& destination_shelf = shelf_pool[destination_slot.shelf_index];
+		Slot& destination_slot = slot_pool[destination_slot_index];
+		Shelf& destination_shelf = shelf_pool[destination_slot.shelf_index];
 		Page& destination_page = page_pool[first_page_index];
 		const unsigned int source_x = source_slot.x;
 		const unsigned int source_y = source_shelf.y;
@@ -98,9 +102,17 @@ void SpriteSet::Tick()
 		destination_page.past_last_dirty_y = std::max(destination_page.past_last_dirty_y, destination_y + height);
 		destination_page.first_dirty_x = std::min(destination_page.first_dirty_x, destination_x);
 		destination_page.past_last_dirty_x = std::max(destination_page.past_last_dirty_x, destination_x + width);
+
+		// Swap the two slots so that we don't have to invalidate the original handle.
+		if (source_shelf.first_slot_index == source_slot_index)
+			source_shelf.first_slot_index = destination_slot_index;
+		if (destination_shelf.first_slot_index == destination_slot_index)
+			destination_shelf.first_slot_index = source_slot_index;
+		destination_slot.epoch = source_slot.epoch;
+		std::swap(source_slot, destination_slot);
+		ComputeRenderDataForSlot(source_slot_index);
+
 		changed_pixels += Remove(source_slot_index);
-		if (migration_callback)
-			migration_callback(source_slot_index, {destination_slot_index, destination_slot.epoch});
 	}
 }
 
@@ -141,6 +153,11 @@ SpriteSet::Handle SpriteSet::Add(
 	page.past_last_dirty_y = std::max(page.past_last_dirty_y, shelf.y + padded_height);
 	page.first_dirty_x = std::min(page.first_dirty_x, slot.x);
 	page.past_last_dirty_x = std::max(page.past_last_dirty_x, slot.x + padded_width);
+
+	if (render_data_pool.size() < slot_pool.size())
+		render_data_pool.resize(slot_pool.size());
+	ComputeRenderDataForSlot(slot_index);
+
 	return {slot_index, slot.epoch};
 }
 
@@ -197,8 +214,25 @@ unsigned int SpriteSet::Allocate(const unsigned int width, const unsigned int he
 
 	const unsigned int shelf_index = AllocateEntry<Shelf>(shelf_pool, next_free_shelf_index);
 	const unsigned int slot_index = AllocateEntry<Slot>(slot_pool, next_free_slot_index);
-	slot_pool[slot_index] = {shelf_index, page_count, 0, 0, page_size, 0, 0, null_index, null_index, null_index, null_index, 0, false};
-	shelf_pool[shelf_index] = {last_page_index, 0, page_size, null_index, null_index, slot_index, slot_index, false};
+	slot_pool[slot_index] = {
+		shelf_index,
+		page_count, // texture_id
+		0, 0, // x; y
+		page_size, 0, // width; height
+		0, // actual_index
+		null_index, null_index, // previous_index; next_index
+		null_index, null_index, // previous_free_index; next_free_index
+		0, // epoch
+		false // allocated
+	};
+	shelf_pool[shelf_index] = {
+		last_page_index, // page_index
+		0, page_size, // y; height
+		null_index, null_index, // previous_index; next_index
+		slot_index, // first_slot_index
+		slot_index, // first_free_slot_index,
+		false // allocated
+	};
 	page.first_shelf_index = shelf_index;
 	++page_count;
 	return TryAllocateInPage(last_page_index, width, height);
@@ -251,11 +285,23 @@ unsigned int SpriteSet::TryAllocateInPage(const unsigned int page_index, const u
 			const unsigned int new_slot_index = AllocateEntry<Slot>(slot_pool, next_free_slot_index);
 			shelf = &shelf_pool[selected_shelf_index];
 			slot_pool[new_slot_index] = {
-				new_shelf_index, page.texture_id, 0, shelf->y + height, page_size, 0, 0, null_index, null_index, null_index, null_index, 0, false
+				new_shelf_index,
+				page.texture_id,
+				0, shelf->y + height, // x; y
+				page_size, 0, // width; height
+				0, // actual_width
+				null_index, null_index, // previous_index; next_index
+				null_index, null_index, // previous_free_index; next_free_index
+				0, // epoch
+				false // allocated
 			};
 			shelf_pool[new_shelf_index] = {
-				page_index, shelf->y + height, shelf->height - height,
-				selected_shelf_index, shelf->next_index,  new_slot_index, new_slot_index, false
+				page_index,
+				shelf->y + height, shelf->height - height, // y; height
+				selected_shelf_index, shelf->next_index, // previous_index; next_index
+				new_slot_index, // first_slot_index
+				new_slot_index, // first_free_slot_index
+				false // allocated
 			};
 			if (shelf->next_index != null_index)
 				shelf_pool[shelf->next_index].previous_index = new_shelf_index;
@@ -269,8 +315,15 @@ unsigned int SpriteSet::TryAllocateInPage(const unsigned int page_index, const u
 		const unsigned int new_slot_index = AllocateEntry<Slot>(slot_pool, next_free_slot_index);
 		slot = &slot_pool[selected_slot_index];
 		slot_pool[new_slot_index] = {
-			selected_shelf_index, page.texture_id, slot->x + width, shelf->y, slot->width - width, 0, 0,
-			selected_slot_index, slot->next_index, slot->previous_free_index, slot->next_free_index, 0, false
+			selected_shelf_index,
+			page.texture_id,
+			slot->x + width, shelf->y, // x; y
+			slot->width - width, 0, // width; height
+			0, // actual_width
+			selected_slot_index, slot->next_index, // previous_index; next_index
+			slot->previous_free_index, slot->next_free_index, // previous_free_index; next_free_index
+			0, // epoch
+			false // allocated
 		};
 		if (slot->next_index != null_index)
 			slot_pool[slot->next_index].previous_index = new_slot_index;
@@ -443,30 +496,63 @@ void SpriteSet::Remove(const Handle handle)
 	Remove(handle.slot_index);
 }
 
-SpriteSet::SpriteData SpriteSet::Get(const Handle handle) const
+bool SpriteSet::IsValid(const Handle handle) const
+{
+	return slot_pool[handle.slot_index].epoch == handle.epoch;
+}
+
+SpriteSet::SpriteInfo SpriteSet::GetInfo(const Handle handle) const
 {
 	const Slot& slot = slot_pool[handle.slot_index];
 	return {
-		slot.texture_id, slot.x + sprite_padding, slot.y + sprite_padding,
-		slot.actual_width - sprite_padding * 2, slot.height - sprite_padding * 2
+		slot.texture_id,
+		slot.x + sprite_padding, slot.y + sprite_padding, // x; y
+		slot.actual_width - sprite_padding * 2, slot.height - sprite_padding * 2 // width; height
 	};
 }
 
-Vector<const unsigned char*> SpriteSet::GetTextures() const
+SpriteSet::SpriteRenderData SpriteSet::GetRenderData(const Handle handle) const
+{
+	return render_data_pool[handle.slot_index];
+}
+
+Vector<SpriteSet::TextureInfo> SpriteSet::GetTextures() const
 {
 	if (first_page_index == null_index)
 		return {};
-	Vector<const unsigned char*> textures;
+	Vector<SpriteSet::TextureInfo> textures;
 	unsigned int page_index = first_page_index;
 	while (true)
 	{
 		const Page& page = page_pool[page_index];
-		textures.push_back(page.texture_data->data());
+		textures.push_back({
+			page.texture_data->data(),
+			page.first_dirty_y,
+			page.past_last_dirty_y,
+			page.first_dirty_x,
+			page.past_last_dirty_x
+		});
 		if (page_index == last_page_index)
 			break;
 		page_index = page.next_index;
 	}
 	return textures;
+}
+
+void SpriteSet::ComputeRenderDataForSlot(unsigned int slot_index)
+{
+	const Slot& slot = slot_pool[slot_index];
+	render_data_pool[slot_index] = {
+		slot.texture_id,
+		{
+			static_cast<float>(slot.x + sprite_padding) / page_size_float,
+			static_cast<float>(slot.y + sprite_padding) / page_size_float
+		},
+		{
+			static_cast<float>(slot.x + slot.actual_width - sprite_padding) / page_size_float,
+			static_cast<float>(slot.y + slot.height - sprite_padding) / page_size_float
+		}
+	};
 }
 
 } // namespace Rml

@@ -34,6 +34,7 @@
 #include "../../../Include/RmlUi/Core/StringUtilities.h"
 #include "../ComputeProperty.h"
 #include "FontFace.h"
+#include "FontFaceHandleDefault.h"
 #include "FontFamily.h"
 #include "FreeTypeInterface.h"
 #include <algorithm>
@@ -71,9 +72,21 @@ void FontProvider::Shutdown()
 
 void FontProvider::OnBeginFrame()
 {
-	auto &font_families = Get().font_families;
+	Get().OnBeginFrameInternal();
+}
+
+void FontProvider::OnBeginFrameInternal()
+{
+	//.sprite_set.Tick();
 	for (auto iterator = font_families.begin(); iterator != font_families.end(); ++iterator)
 		iterator->second->OnBeginFrame();
+	glyph_lru_list.tick();
+	while (glyph_lru_list.getLastEntryAge() > 600)
+	{
+		const auto& entry = *glyph_lru_list.getLast();
+		entry.font_face->RemoveGlyph(entry.font_effects_handle, entry.character, sprite_set);
+		glyph_lru_list.evictLast();
+	}
 }
 
 FontProvider& FontProvider::Get()
@@ -112,9 +125,16 @@ FontFaceHandleDefault* FontProvider::GetFallbackFontFace(int index, int font_siz
 
 void FontProvider::ReleaseFontResources()
 {
-	RMLUI_ASSERT(g_font_provider);
-	for (auto& name_family : g_font_provider->font_families)
+	Get().ReleaseFontResourcesInternal();
+}
+
+void FontProvider::ReleaseFontResourcesInternal()
+{
+	for (auto& name_family : font_families)
 		name_family.second->ReleaseFontResources();
+	sprite_set = {4, texture_size, 1};
+	render_textures.clear();
+	glyph_lru_list = {};
 }
 
 bool FontProvider::LoadFontFace(const String& file_name, int face_index, bool fallback_face, Style::FontWeight weight)
@@ -268,6 +288,66 @@ bool FontProvider::AddFace(FontFaceHandleFreetype face, const String& family, St
 	}
 
 	return static_cast<bool>(font_face_result);
+}
+
+bool FontProvider::EnsureGlyphs(FontFaceHandle handle, FontEffectsHandle font_effects_handle, StringView string)
+{
+	return Get().EnsureGlyphsInternal(handle, font_effects_handle, string);
+}
+
+bool FontProvider::EnsureGlyphsInternal(FontFaceHandle handle, FontEffectsHandle font_effects_handle, StringView string)
+{
+	auto handle_default = reinterpret_cast<FontFaceHandleDefault*>(handle);
+	return handle_default->EnsureGlyphs(string, static_cast<int>(font_effects_handle), glyph_lru_list);
+}
+
+int FontProvider::GenerateString(
+	RenderManager& render_manager, FontFaceHandle handle, FontEffectsHandle font_effects_handle,
+	StringView string, Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
+	TexturedMeshList& mesh_list)
+{
+	return Get().GenerateStringInternal(render_manager, handle, font_effects_handle, string, position, colour, opacity, text_shaping_context, mesh_list);
+}
+
+int FontProvider::GenerateStringInternal(
+	RenderManager& render_manager, FontFaceHandle handle, FontEffectsHandle font_effects_handle,
+	StringView string, Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
+	TexturedMeshList& mesh_list)
+{
+	const auto handle_default = reinterpret_cast<FontFaceHandleDefault*>(handle);
+	const int layer_configuration = static_cast<int>(font_effects_handle);
+	if (handle_default->LoadGlyphsForString(string, layer_configuration, sprite_set, glyph_lru_list))
+		FlushTextureAtlases();
+	return handle_default->GenerateString(
+		render_manager, sprite_set, render_textures, mesh_list, string, position, colour, opacity,
+		text_shaping_context.letter_spacing, layer_configuration
+	);
+}
+
+void FontProvider::FlushTextureAtlases()
+{
+	const Vector<SpriteSet::TextureInfo> texture_infos = sprite_set.GetTextures();
+	const int texture_count = static_cast<int>(texture_infos.size());
+	for (int texture_id = 0; texture_id < texture_count; ++texture_id)
+	{
+		const SpriteSet::TextureInfo& texture_info = texture_infos[texture_id];
+		if (texture_id < render_textures.size() && texture_info.first_dirty_y >= texture_info.past_last_dirty_y)
+			continue;
+		const unsigned char* const texture_data = texture_info.texture_data;
+		CallbackTextureFunction texture_callback
+			= [texture_data](const CallbackTextureInterface& texture_interface) -> bool {
+			return texture_interface.GenerateTexture(
+				{texture_data, texture_size * texture_size * 4}, {texture_size, texture_size}
+			);
+		};
+
+		static_assert(std::is_nothrow_move_constructible<CallbackTextureSource>::value,
+			"CallbackTextureSource must be nothrow move constructible so that it can be placed in the vector below.");
+		if (texture_id >= render_textures.size())
+			render_textures.emplace_back(std::move(texture_callback));
+		else
+			render_textures[texture_id] = {std::move(texture_callback)};
+	}
 }
 
 } // namespace Rml

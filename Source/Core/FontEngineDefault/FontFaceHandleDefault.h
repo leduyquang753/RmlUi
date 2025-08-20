@@ -36,15 +36,17 @@
 #include "../../../Include/RmlUi/Core/Texture.h"
 #include "../../../Include/RmlUi/Core/Traits.h"
 #include "../../../Include/RmlUi/Core/Types.h"
+#include "FontProvider.h"
 #include "FontTypes.h"
 #include "LruList.h"
 
 namespace Rml {
 
 class FontFaceLayer;
+class SpriteSet;
 
 /**
-    @author Peter Curry
+	@author Peter Curry
  */
 
 class FontFaceHandleDefault final : public NonCopyMoveable {
@@ -77,8 +79,11 @@ public:
 	/// @param[in] font_effect The font effect used for the layer.
 	/// @param[in] texture_id The index of the texture within the layer to generate.
 	/// @param[in] handle_version The version of the handle data. Function returns false if out of date.
-	bool GenerateLayerTexture(Span<const byte>& texture_data, Vector2i& texture_dimensions, const FontEffect* font_effect, int texture_id,
-		int handle_version) const;
+	//bool GenerateLayerTexture(Span<const byte>& texture_data, Vector2i& texture_dimensions, const FontEffect* font_effect, int texture_id,
+	//	int handle_version) const;
+
+	bool LoadGlyphsForString(
+		StringView string, int layer_configuration, SpriteSet &sprite_set, FontProvider::GlyphLruList& glyph_lru_list);
 
 	/// Generates the geometry required to render a single line of text.
 	/// @param[in] render_manager The render manager responsible for rendering the string.
@@ -90,10 +95,15 @@ public:
 	/// @param[in] letter_spacing The letter spacing size in pixels.
 	/// @param[in] layer_configuration Face configuration index to use for generating string.
 	/// @return The width, in pixels, of the string geometry.
-	int GenerateString(RenderManager& render_manager, TexturedMeshList& mesh_list, StringView string, Vector2f position, ColourbPremultiplied colour,
+	int GenerateString(
+		RenderManager& render_manager, SpriteSet& sprite_set,
+		const Vector<CallbackTextureSource>& render_textures, TexturedMeshList& mesh_list,
+		StringView string, Vector2f position, ColourbPremultiplied colour,
 		float opacity, float letter_spacing, int layer_configuration);
-	
-	bool EnsureGlyphs(StringView string);
+
+	bool EnsureGlyphs(StringView string, int layer_configuration, FontProvider::GlyphLruList& glyph_lru_list);
+
+	void RemoveGlyph(int layer_configuration, Character character, SpriteSet& sprite_set);
 
 	/// Version is changed whenever the layers are dirtied, requiring regeneration of string geometry.
 	int GetVersion() const;
@@ -115,7 +125,7 @@ private:
 	const FontGlyph* GetOrAppendGlyph(Character& character, bool look_in_fallback_fonts = true);
 
 	// Regenerate layers if dirty, such as after adding new glyphs.
-	bool UpdateLayersOnDirty();
+	//bool UpdateLayersOnDirty();
 
 	// Create a new layer from the given font effect if it does not already exist.
 	FontFaceLayer* GetOrCreateLayer(const SharedPtr<const FontEffect>& font_effect);
@@ -123,12 +133,9 @@ private:
 	// (Re-)generate a layer in this font face handle.
 	bool GenerateLayer(FontFaceLayer* layer);
 
-	using GlyphLruList = LruList<Character>;
 	FontGlyphMap glyphs;
-	GlyphLruList glyph_lru_list;
-	UnorderedMap<Character, GlyphLruList::Handle> glyph_lru_list_handle_map;
-	Vector<Character> new_characters;
-	Vector<const FontGlyphMap::value_type*> new_glyphs;
+	UnorderedMap<Character, int> glyph_use_map;
+	UnorderedSet<Character> glyphs_not_in_use;
 
 	struct EffectLayerPair {
 		const FontEffect* font_effect;

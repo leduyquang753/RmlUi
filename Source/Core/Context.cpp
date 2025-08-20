@@ -242,6 +242,8 @@ bool Context::Render()
 {
 	RMLUI_ZoneScoped;
 
+	GetFontEngineInterface()->OnBeginFrame();
+
 	render_manager->PrepareRender(dimensions);
 
 	root->Render();

@@ -119,7 +119,8 @@ void ElementText::OnRender()
 	bool should_regenerate = geometry_dirty;
 	if (!should_regenerate)
 		for (size_t i = 0; i < lines.size(); ++i)
-			should_regenerate = !font_engine_interface.EnsureGlyphs(font_face_handle, lines[i].text) || should_regenerate;
+			should_regenerate = should_regenerate
+				|| !font_engine_interface.EnsureGlyphs(font_face_handle, font_effects_handle, lines[i].text);
 	if (should_regenerate)
 		GenerateGeometry(render_manager, font_face_handle);
 

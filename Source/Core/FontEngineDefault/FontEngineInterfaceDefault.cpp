@@ -88,15 +88,12 @@ int FontEngineInterfaceDefault::GenerateString(RenderManager& render_manager, Fo
 	StringView string, Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
 	TexturedMeshList& mesh_list)
 {
-	auto handle_default = reinterpret_cast<FontFaceHandleDefault*>(handle);
-	return handle_default->GenerateString(render_manager, mesh_list, string, position, colour, opacity, text_shaping_context.letter_spacing,
-		(int)font_effects_handle);
+	return FontProvider::GenerateString(render_manager, handle, font_effects_handle, string, position, colour, opacity, text_shaping_context, mesh_list);
 }
 
-bool FontEngineInterfaceDefault::EnsureGlyphs(FontFaceHandle handle, StringView string)
+bool FontEngineInterfaceDefault::EnsureGlyphs(FontFaceHandle handle, FontEffectsHandle font_effects_handle, StringView string)
 {
-	auto handle_default = reinterpret_cast<FontFaceHandleDefault*>(handle);
-	return handle_default->EnsureGlyphs(string);
+	return FontProvider::EnsureGlyphs(handle, font_effects_handle, string);
 }
 
 int FontEngineInterfaceDefault::GetVersion(FontFaceHandle handle)

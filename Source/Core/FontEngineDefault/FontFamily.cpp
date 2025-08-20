@@ -73,7 +73,7 @@ FontFaceHandleDefault* FontFamily::GetFaceHandle(Style::FontStyle style, Style::
 	if (!matching_face)
 		return nullptr;
 
-	return matching_face->GetHandle(size, true);
+	return matching_face->GetHandle(size, false);
 }
 
 FontFace* FontFamily::AddFace(FontFaceHandleFreetype ft_face, Style::FontStyle style, Style::FontWeight weight, UniquePtr<byte[]> face_memory)

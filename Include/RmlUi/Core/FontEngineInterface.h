@@ -120,7 +120,7 @@ public:
 	virtual int GenerateString(RenderManager& render_manager, FontFaceHandle face_handle, FontEffectsHandle font_effects_handle, StringView string,
 		Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context, TexturedMeshList& mesh_list);
 
-	virtual bool EnsureGlyphs(FontFaceHandle face_handle, StringView string);
+	virtual bool EnsureGlyphs(FontFaceHandle face_handle, FontEffectsHandle font_effects_handle, StringView string);
 
 	/// Called by RmlUi to determine if the text geometry is required to be re-generated. Whenever the returned version
 	/// is changed, all geometry belonging to the given face handle will be re-generated.

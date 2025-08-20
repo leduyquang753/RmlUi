@@ -68,7 +68,7 @@ public:
 		Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
 		TexturedMeshList& mesh_list) override;
 
-	bool EnsureGlyphs(FontFaceHandle face_handle, StringView string) override;
+	bool EnsureGlyphs(FontFaceHandle face_handle, FontEffectsHandle font_effects_handle, StringView string) override;
 
 	/// Returns the current version of the font face.
 	int GetVersion(FontFaceHandle handle) override;

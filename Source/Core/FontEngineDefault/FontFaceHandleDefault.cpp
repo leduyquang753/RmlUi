@@ -41,12 +41,8 @@ namespace Rml {
 static constexpr char32_t KerningCache_AsciiSubsetBegin = 32;
 static constexpr char32_t KerningCache_AsciiSubsetLast = 126;
 
-FontFaceHandleDefault::FontFaceHandleDefault()
-{
-	base_layer = nullptr;
-	metrics = {};
-	ft_face = 0;
-}
+FontFaceHandleDefault::FontFaceHandleDefault():
+	base_layer(nullptr), metrics(), ft_face(0) {}
 
 FontFaceHandleDefault::~FontFaceHandleDefault()
 {
@@ -62,8 +58,8 @@ bool FontFaceHandleDefault::Initialize(FontFaceHandleFreetype face, int font_siz
 
 	if (!FreeType::InitialiseFaceHandle(ft_face, font_size, glyphs, metrics, load_default_glyphs))
 		return false;
-	for (auto iterator = glyphs.begin(); iterator != glyphs.end(); ++iterator)
-		new_glyphs.push_back(&*iterator);
+	//for (auto iterator = glyphs.begin(); iterator != glyphs.end(); ++iterator)
+	//	new_glyphs.push_back(&*iterator);
 
 	has_kerning = FreeType::HasKerning(ft_face);
 	FillKerningPairCache();
@@ -72,7 +68,7 @@ bool FontFaceHandleDefault::Initialize(FontFaceHandleFreetype face, int font_siz
 	base_layer = GetOrCreateLayer(nullptr);
 	layer_configurations.push_back(LayerConfiguration{base_layer});
 
-	new_glyphs.clear();
+	//new_glyphs.clear();
 
 	return true;
 }
@@ -88,18 +84,12 @@ const FontGlyphMap& FontFaceHandleDefault::GetGlyphs() const
 }
 
 void FontFaceHandleDefault::PurgeUnusedGlyphs() {
-	glyph_lru_list.tick();
-	Vector<Character> purged_characters;
-	while (glyph_lru_list.getLastEntryAge() > 600) {
-		const Character character = *glyph_lru_list.getLast();
+	for (const Character character : glyphs_not_in_use)
+	{
 		glyphs.erase(character);
-		glyph_lru_list_handle_map.erase(character);
-		glyph_lru_list.evictLast();
-		purged_characters.push_back(character);
+		glyph_use_map.erase(character);
 	}
-	if (!purged_characters.empty())
-		for (auto& pair : layers)
-			pair.layer->RemoveGlyphs(purged_characters);
+	glyphs_not_in_use.clear();
 }
 
 int FontFaceHandleDefault::GetStringWidth(StringView string, float letter_spacing, Character prior_character)
@@ -192,27 +182,85 @@ int FontFaceHandleDefault::GenerateLayerConfiguration(const FontEffectList& font
 	return (int)(layer_configurations.size() - 1);
 }
 
-bool FontFaceHandleDefault::GenerateLayerTexture(Span<const byte>& texture_data, Vector2i& texture_dimensions, const FontEffect* font_effect,
-	int texture_id, int handle_version) const
+//bool FontFaceHandleDefault::GenerateLayerTexture(Span<const byte>& texture_data, Vector2i& texture_dimensions, const FontEffect* font_effect,
+//	int texture_id, int handle_version) const
+//{
+//	if (handle_version != version)
+//	{
+//		RMLUI_ERRORMSG("While generating font layer texture: Handle version mismatch in texture vs font-face.");
+//		return false;
+//	}
+//
+//	auto it = std::find_if(layers.begin(), layers.end(), [font_effect](const EffectLayerPair& pair) { return pair.font_effect == font_effect; });
+//
+//	if (it == layers.end())
+//	{
+//		RMLUI_ERRORMSG("While generating font layer texture: Layer id not found.");
+//		return false;
+//	}
+//
+//	return it->layer->GenerateTexture(texture_data, texture_dimensions, texture_id, glyphs);
+//}
+
+bool FontFaceHandleDefault::LoadGlyphsForString(
+	StringView string, int layer_configuration_index, SpriteSet& sprite_set, FontProvider::GlyphLruList& glyph_lru_list)
 {
-	if (handle_version != version)
+	RMLUI_ASSERT(layer_configuration_index >= 0);
+	RMLUI_ASSERT(layer_configuration_index < (int)layer_configurations.size());
+
+	bool loaded_new_glyphs = false;
+	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
+	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
 	{
-		RMLUI_ERRORMSG("While generating font layer texture: Handle version mismatch in texture vs font-face.");
-		return false;
+		FontFaceLayer* layer = layer_configuration[layer_index];
+		const FontEffect* font_effect = layer->GetFontEffect();
+		FontFaceLayer* clone = nullptr;
+		bool clone_glyph_origins = false;
+		if (font_effect)
+		{
+			// Determine which, if any, layer the new layer should copy its geometry and textures from.
+			String generation_key;
+			size_t fingerprint = font_effect->GetFingerprint();
+
+			if (!font_effect->HasUniqueTexture())
+			{
+				clone = base_layer;
+				clone_glyph_origins = false;
+			}
+			else
+			{
+				auto cache_iterator = layer_cache.find(fingerprint);
+				if (cache_iterator != layer_cache.end() && cache_iterator->second != layer)
+					clone = cache_iterator->second;
+			}
+
+			// Cache the layer in the layer cache if it generated its own textures (ie, didn't clone).
+			if (!clone)
+				layer_cache[fingerprint] = layer;
+		}
+
+		for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
+		{
+			Character character = *it_string;
+			if (layer->HasGlyph(character))
+				continue;
+			const FontGlyph* const glyph = GetOrAppendGlyph(character, false);
+			if (!glyph)
+				continue;
+			LruListHandle lru_list_handle = glyph_lru_list.add({this, layer_configuration_index, character});
+			layer->AddGlyph(this, character, *glyph, sprite_set, lru_list_handle, clone, clone_glyph_origins);
+			++glyph_use_map[character];
+			glyphs_not_in_use.erase(character);
+			loaded_new_glyphs = true;
+		}
 	}
-
-	auto it = std::find_if(layers.begin(), layers.end(), [font_effect](const EffectLayerPair& pair) { return pair.font_effect == font_effect; });
-
-	if (it == layers.end())
-	{
-		RMLUI_ERRORMSG("While generating font layer texture: Layer id not found.");
-		return false;
-	}
-
-	return it->layer->GenerateTexture(texture_data, texture_dimensions, texture_id, glyphs);
+	return loaded_new_glyphs;
 }
 
-int FontFaceHandleDefault::GenerateString(RenderManager& render_manager, TexturedMeshList& mesh_list, StringView string, const Vector2f position,
+int FontFaceHandleDefault::GenerateString(
+	RenderManager& render_manager, SpriteSet& sprite_set,
+	const Vector<CallbackTextureSource>& render_textures, TexturedMeshList& mesh_list,
+	StringView string, const Vector2f position,
 	const ColourbPremultiplied colour, const float opacity, const float letter_spacing, const int layer_configuration_index)
 {
 	RMLUI_ASSERT(layer_configuration_index >= 0);
@@ -222,16 +270,23 @@ int FontFaceHandleDefault::GenerateString(RenderManager& render_manager, Texture
 	int line_width = 0;
 	bool has_set_size = false;
 
-	UpdateLayersOnDirty();
+	//UpdateLayersOnDirty();
 
 	// Fetch the requested configuration and generate the geometry for each one.
 	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
 
 	// Each texture represents one geometry.
-	const int num_geometries = std::accumulate(layer_configuration.begin(), layer_configuration.end(), 0,
-		[](int sum, const FontFaceLayer* layer) { return sum + layer->GetNumTextures(); });
+	//const int num_geometries = std::accumulate(layer_configuration.begin(), layer_configuration.end(), 0,
+	//	[](int sum, const FontFaceLayer* layer) { return sum + layer->GetNumTextures(); });
 
-	mesh_list.resize(num_geometries);
+	const int num_textures = static_cast<int>(render_textures.size());
+	mesh_list.resize(num_textures);
+	// Set the mesh and textures to the geometries.
+	for (int tex_index = 0; tex_index < num_textures; ++tex_index)
+		mesh_list[tex_index].texture = render_textures[tex_index].GetTexture(render_manager);
+
+	//mesh_list[geometry_index].mesh.indices.reserve(string.size() * 6);
+	//mesh_list[geometry_index].mesh.vertices.reserve(string.size() * 4);
 
 	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
 	{
@@ -243,27 +298,17 @@ int FontFaceHandleDefault::GenerateString(RenderManager& render_manager, Texture
 		else
 			layer_colour = layer->GetColour(opacity);
 
-		const int num_textures = layer->GetNumTextures();
-		if (num_textures == 0)
-			continue;
 
-		RMLUI_ASSERT(geometry_index + num_textures <= (int)mesh_list.size());
+		//RMLUI_ASSERT(geometry_index + num_textures <= (int)mesh_list.size());
 
 		line_width = 0;
 		Character prior_character = Character::Null;
-
-		// Set the mesh and textures to the geometries.
-		for (int tex_index = 0; tex_index < num_textures; ++tex_index)
-			mesh_list[geometry_index + tex_index].texture = layer->GetTexture(render_manager, tex_index);
-
-		mesh_list[geometry_index].mesh.indices.reserve(string.size() * 6);
-		mesh_list[geometry_index].mesh.vertices.reserve(string.size() * 4);
 
 		for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
 		{
 			Character character = *it_string;
 
-			const FontGlyph* glyph = GetOrAppendGlyph(character);
+			const FontGlyph* glyph = GetOrAppendGlyph(character, false); // Fallback lookup already done in the previous calls.
 			if (!glyph)
 				continue;
 
@@ -275,7 +320,8 @@ int FontFaceHandleDefault::GenerateString(RenderManager& render_manager, Texture
 			if (layer == base_layer && glyph->color_format == ColorFormat::RGBA8)
 				glyph_color = ColourbPremultiplied(layer_colour.alpha, layer_colour.alpha);
 
-			layer->GenerateGeometry(&mesh_list[geometry_index], character, Vector2f(position.x + line_width, position.y), glyph_color);
+			layer->GenerateGeometry(
+				sprite_set, mesh_list.data(), character, Vector2f(position.x + line_width, position.y), glyph_color);
 
 			line_width += glyph->advance;
 			line_width += (int)letter_spacing;
@@ -288,57 +334,86 @@ int FontFaceHandleDefault::GenerateString(RenderManager& render_manager, Texture
 	return Math::Max(line_width, 0);
 }
 
-bool FontFaceHandleDefault::EnsureGlyphs(StringView string)
+bool FontFaceHandleDefault::EnsureGlyphs(
+	StringView string, int layer_configuration_index, FontProvider::GlyphLruList& glyph_lru_list)
 {
 	bool all_alive = true;
-	for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
+	RMLUI_ASSERT(layer_configuration_index >= 0);
+	RMLUI_ASSERT(layer_configuration_index < (int)layer_configurations.size());
+
+	bool loaded_new_glyphs = false;
+	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
+	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
 	{
-		Character character = *it_string;
-		if ((char32_t)character < (char32_t)' ')
-			continue;
-		if (glyphs.find(character) == glyphs.end())
+		FontFaceLayer* layer = layer_configuration[layer_index];
+		for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
 		{
-			new_characters.push_back(character);
-			all_alive = false;
-		}
-		else
-		{
-			glyph_lru_list.ping(glyph_lru_list_handle_map[character]);
+			Character character = *it_string;
+			if ((char32_t)character < (char32_t)' ')
+				continue;
+			if (!layer->HasGlyph(character))
+			{
+				all_alive = false;
+			}
+			else
+			{
+				glyph_lru_list.ping(layer->GetLruListHandle(character));
+			}
 		}
 	}
-	if (!all_alive)
-		is_layers_dirty = true;
+	//if (!all_alive)
+	//	is_layers_dirty = true;
 	return all_alive;
 }
 
-bool FontFaceHandleDefault::UpdateLayersOnDirty()
+void FontFaceHandleDefault::RemoveGlyph(int layer_configuration_index, Character character, SpriteSet& sprite_set)
 {
-	bool result = false;
+	RMLUI_ASSERT(layer_configuration_index >= 0);
+	RMLUI_ASSERT(layer_configuration_index < (int)layer_configurations.size());
 
-	// If we are dirty, regenerate all the layers and increment the version
-	if (is_layers_dirty && base_layer)
+	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
+	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
 	{
-		is_layers_dirty = false;
-		++version;
-
-		// Regenerate all the layers.
-		// Note: The layer regeneration needs to happen in the order in which the layers were created,
-		// otherwise we may end up cloning a layer which has not yet been regenerated. This means trouble!
-		for (const auto character : new_characters)
-			new_glyphs.push_back(&*glyphs.find(character));
-
-		for (auto& pair : layers)
+		FontFaceLayer* layer = layer_configuration[layer_index];
+		layer->RemoveGlyph(character, sprite_set);
+		int& glyph_user_count = glyph_use_map[character];
+		--glyph_user_count;
+		if (glyph_user_count <= 0)
 		{
-			GenerateLayer(pair.layer.get());
+			glyphs.erase(character);
+			glyph_use_map.erase(character);
 		}
-
-		new_characters.clear();
-		new_glyphs.clear();
-		result = true;
 	}
-
-	return result;
 }
+
+//bool FontFaceHandleDefault::UpdateLayersOnDirty()
+//{
+//	bool result = false;
+//
+//	// If we are dirty, regenerate all the layers and increment the version
+//	if (is_layers_dirty && base_layer)
+//	{
+//		is_layers_dirty = false;
+//		++version;
+//
+//		// Regenerate all the layers.
+//		// Note: The layer regeneration needs to happen in the order in which the layers were created,
+//		// otherwise we may end up cloning a layer which has not yet been regenerated. This means trouble!
+//		//for (const auto character : new_characters)
+//		//	new_glyphs.push_back(&*glyphs.find(character));
+//
+//		for (auto& pair : layers)
+//		{
+//			GenerateLayer(pair.layer.get());
+//		}
+//
+//		//new_characters.clear();
+//		//new_glyphs.clear();
+//		result = true;
+//	}
+//
+//	return result;
+//}
 
 int FontFaceHandleDefault::GetVersion() const
 {
@@ -425,8 +500,7 @@ const FontGlyph* FontFaceHandleDefault::GetOrAppendGlyph(Character& character, b
 				RMLUI_ERROR;
 				return nullptr;
 			}
-			glyph_lru_list_handle_map.emplace(character, glyph_lru_list.add(character));
-			new_characters.push_back(character);
+			//new_characters.emplace(character);
 
 			is_layers_dirty = true;
 		}
@@ -459,8 +533,7 @@ const FontGlyph* FontFaceHandleDefault::GetOrAppendGlyph(Character& character, b
 				if (it_glyph == glyphs.end())
 					return nullptr;
 			}
-			glyph_lru_list_handle_map.emplace(character, glyph_lru_list.add(character));
-			new_characters.push_back(character);
+			//new_characters.emplace(character);
 		}
 		else
 		{
@@ -500,7 +573,7 @@ bool FontFaceHandleDefault::GenerateLayer(FontFaceLayer* layer)
 
 	if (!font_effect)
 	{
-		result = layer->Generate(this, new_glyphs);
+		//result = layer->Generate(this, new_glyphs);
 	}
 	else
 	{
@@ -523,7 +596,7 @@ bool FontFaceHandleDefault::GenerateLayer(FontFaceLayer* layer)
 		}
 
 		// Create a new layer.
-		result = layer->Generate(this, new_glyphs, clone, clone_glyph_origins);
+		//result = layer->Generate(this, new_glyphs, clone, clone_glyph_origins);
 
 		// Cache the layer in the layer cache if it generated its own textures (ie, didn't clone).
 		if (!clone)

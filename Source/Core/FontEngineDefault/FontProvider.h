@@ -32,6 +32,8 @@
 #include "../../../Include/RmlUi/Core/StyleTypes.h"
 #include "../../../Include/RmlUi/Core/Types.h"
 #include "FontTypes.h"
+#include "LruList.h"
+#include "SpriteSet.h"
 
 namespace Rml {
 
@@ -40,12 +42,21 @@ class FontFamily;
 class FontFaceHandleDefault;
 
 /**
-    The font provider contains all font families currently in use by RmlUi.
-    @author Peter Curry
+	The font provider contains all font families currently in use by RmlUi.
+	@author Peter Curry
  */
 
 class FontProvider {
 public:
+	struct GlyphLruEntry {
+		FontFaceHandleDefault* font_face;
+		int font_effects_handle;
+		Character character;
+	};
+	using GlyphLruList = LruList<GlyphLruEntry>;
+
+	static constexpr int texture_size = 512;
+
 	static bool Initialise();
 	static void Shutdown();
 	static void OnBeginFrame();
@@ -66,6 +77,14 @@ public:
 	/// Adds a new font face from memory.
 	static bool LoadFontFace(Span<const byte> data, int face_index, const String& font_family, Style::FontStyle style, Style::FontWeight weight, bool fallback_face);
 
+	static bool EnsureGlyphs(FontFaceHandle face_handle, FontEffectsHandle font_effects_handle, StringView string);
+
+	/// Generates the geometry required to render a single line of text.
+	static int GenerateString(
+		RenderManager& render_manager, FontFaceHandle face_handle, FontEffectsHandle effects_handle, StringView string,
+		Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
+		TexturedMeshList& mesh_list);
+
 	/// Return the number of fallback font faces.
 	static int CountFallbackFontFaces();
 
@@ -81,19 +100,40 @@ private:
 
 	static FontProvider& Get();
 
+	void OnBeginFrameInternal();
+
 	bool LoadFontFace(Span<const byte> data, int face_index, bool fallback_face, UniquePtr<byte[]> face_memory, const String& source, String font_family,
 		Style::FontStyle style, Style::FontWeight weight);
 
 	bool AddFace(FontFaceHandleFreetype face, const String& family, Style::FontStyle style, Style::FontWeight weight, bool fallback_face,
 		UniquePtr<byte[]> face_memory);
 
+	bool EnsureGlyphsInternal(FontFaceHandle face_handle, FontEffectsHandle font_effects_handle, StringView string);
+
+	/// Generates the geometry required to render a single line of text.
+	int GenerateStringInternal(
+		RenderManager& render_manager, FontFaceHandle face_handle, FontEffectsHandle effects_handle, StringView string,
+		Vector2f position, ColourbPremultiplied colour, float opacity, const TextShapingContext& text_shaping_context,
+		TexturedMeshList& mesh_list);
+
+	LruListHandle OnGlyphUse(FontFaceHandleDefault* font_face, int font_effects_handle, Character character);
+
+	void FlushTextureAtlases();
+
+	void ReleaseFontResourcesInternal();
+
 	using FontFaceList = Vector<FontFace*>;
 	using FontFamilyMap = UnorderedMap<String, UniquePtr<FontFamily>>;
+	using RenderTextureList = Vector<CallbackTextureSource>;
 
 	FontFamilyMap font_families;
 	FontFaceList fallback_font_faces;
 
 	static const String debugger_font_family_name;
+
+	SpriteSet sprite_set{4, texture_size, 1};
+	RenderTextureList render_textures;
+	GlyphLruList glyph_lru_list;
 };
 
 } // namespace Rml

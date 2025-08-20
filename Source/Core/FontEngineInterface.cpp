@@ -82,7 +82,7 @@ int FontEngineInterface::GenerateString(RenderManager& /*render_manager*/, FontF
 	return 0;
 }
 
-bool FontEngineInterface::EnsureGlyphs(FontFaceHandle /*handle*/, StringView /*string*/)
+bool FontEngineInterface::EnsureGlyphs(FontFaceHandle /*handle*/, FontEffectsHandle /*font_effects_handle*/, StringView /*string*/)
 {
 	return true;
 }
