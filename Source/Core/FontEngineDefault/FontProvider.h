@@ -40,6 +40,7 @@ namespace Rml {
 class FontFace;
 class FontFamily;
 class FontFaceHandleDefault;
+class FontFaceLayer;
 
 /**
 	The font provider contains all font families currently in use by RmlUi.
@@ -50,7 +51,7 @@ class FontProvider {
 public:
 	struct GlyphLruEntry {
 		FontFaceHandleDefault* font_face;
-		int font_effects_handle;
+		FontFaceLayer* layer;
 		Character character;
 	};
 	using GlyphLruList = LruList<GlyphLruEntry>;

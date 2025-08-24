@@ -19,7 +19,7 @@ class SpriteSet final {
 public:
 	struct Handle {
 		unsigned int slot_index;
-		unsigned int epoch;
+		unsigned int generation;
 	};
 	struct SpriteRenderData {
 		unsigned int texture_id;
@@ -126,7 +126,7 @@ private:
 		unsigned int next_index;
 		unsigned int previous_free_index;
 		unsigned int next_free_index;
-		unsigned int epoch;
+		unsigned int generation;
 		bool allocated;
 	};
 
@@ -144,7 +144,6 @@ private:
 	unsigned int next_free_shelf_index = 0;
 	unsigned int next_free_slot_index = 0;
 	unsigned int first_page_allocated_pixels = 0;
-	unsigned int current_epoch = 0;
 
 	unsigned int Allocate(unsigned int width, unsigned int height);
 	unsigned int TryAllocateInPage(unsigned int page_index, unsigned int width, unsigned int height);

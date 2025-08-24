@@ -78,7 +78,7 @@ bool FontFaceLayer::AddGlyph(
 		//textures_ptr = clone->textures_ptr;
 
 		// Request the effect (if we have one) and adjust the origins as appropriate.
-		if (effect && !clone_glyph_origins)
+		if (effect)
 		{
 			auto it = source_character_boxes.find(character);
 			if (it == source_character_boxes.end())
@@ -93,10 +93,13 @@ bool FontFaceLayer::AddGlyph(
 			Vector2i glyph_origin = Vector2i(box.origin);
 			Vector2i glyph_dimensions = Vector2i(box.dimensions);
 
-			if (effect->GetGlyphMetrics(glyph_origin, glyph_dimensions, glyph))
-				box.origin = Vector2f(glyph_origin);
-			//else
-			//	box.texture_index = -1;
+			if (!clone_glyph_origins)
+			{
+				if (effect->GetGlyphMetrics(glyph_origin, glyph_dimensions, glyph))
+					box.origin = Vector2f(glyph_origin);
+				// else
+				//	box.texture_index = -1;
+			}
 			box.lru_list_handle = lru_list_handle;
 			character_boxes[character] = box;
 		}
@@ -108,7 +111,7 @@ bool FontFaceLayer::AddGlyph(
 		Vector2i glyph_dimensions = glyph.bitmap_dimensions;
 
 		// Adjust glyph origin / dimensions for the font effect.
-		if (effect)
+		if (effect && glyph.bitmap_data != nullptr)
 		{
 			if (!effect->GetGlyphMetrics(glyph_origin, glyph_dimensions, glyph))
 				return false;
@@ -126,27 +129,31 @@ bool FontFaceLayer::AddGlyph(
 		*/
 
 		//SpriteSet::Handle sprite_set_handle;
-		if (effect == nullptr)
+		box.has_texture = glyph.bitmap_data != nullptr;
+		if (box.has_texture)
 		{
-			if (glyph.color_format == ColorFormat::RGBA8)
+			if (effect == nullptr)
 			{
-				box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, glyph.bitmap_data);
+				if (glyph.color_format == ColorFormat::RGBA8)
+				{
+					box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, glyph.bitmap_data);
+				}
+				else
+				{
+					const int glyph_pixel_count = glyph_dimensions.x * glyph_dimensions.y;
+					Vector<unsigned char> unpacked_bitmap(glyph_pixel_count * 4);
+					for (int i = 0; i < glyph_pixel_count; ++i)
+						for (int c = 0; c < 4; ++c)
+							unpacked_bitmap[i * 4 + c] = glyph.bitmap_data[i];
+					box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, unpacked_bitmap.data());
+				}
 			}
 			else
 			{
-				const int glyph_pixel_count = glyph_dimensions.x * glyph_dimensions.y;
-				Vector<unsigned char> unpacked_bitmap(glyph_pixel_count * 4);
-				for (int i = 0; i < glyph_pixel_count; ++i)
-					for (int c = 0; c < 4; ++c)
-						unpacked_bitmap[i * 4 + c] = glyph.bitmap_data[i];
-				box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, unpacked_bitmap.data());
+				Vector<unsigned char> processed_bitmap(glyph_dimensions.x * glyph_dimensions.y * 4);
+				effect->GenerateGlyphTexture(processed_bitmap.data(), glyph_dimensions, glyph_dimensions.x * 4, glyph);
+				box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, processed_bitmap.data());
 			}
-		}
-		else
-		{
-			Vector<unsigned char> processed_bitmap(glyph_dimensions.x * glyph_dimensions.y * 4);
-			effect->GenerateGlyphTexture(processed_bitmap.data(), glyph_dimensions, glyph_dimensions.x * 4, glyph);
-			box.sprite_set_handle = sprite_set.Add(glyph_dimensions.x, glyph_dimensions.y, processed_bitmap.data());
 		}
 		//sprite_set_handle_map.emplace(character, sprite_set_handle);
 		//const auto sprite_data = sprite_set.Get(sprite_set_handle);
@@ -225,7 +232,8 @@ void FontFaceLayer::RemoveGlyph(Character character, SpriteSet& sprite_set)
 	const auto iterator = character_boxes.find(character);
 	if (iterator == character_boxes.end())
 		return;
-	sprite_set.Remove(iterator->second.sprite_set_handle);
+	if (iterator->second.has_texture)
+		sprite_set.Remove(iterator->second.sprite_set_handle);
 	character_boxes.erase(character);
 }
 

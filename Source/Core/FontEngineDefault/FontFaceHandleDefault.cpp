@@ -215,11 +215,11 @@ bool FontFaceHandleDefault::LoadGlyphsForString(
 		FontFaceLayer* layer = layer_configuration[layer_index];
 		const FontEffect* font_effect = layer->GetFontEffect();
 		FontFaceLayer* clone = nullptr;
-		bool clone_glyph_origins = false;
+		bool clone_glyph_origins = true;
+		/*
 		if (font_effect)
 		{
 			// Determine which, if any, layer the new layer should copy its geometry and textures from.
-			String generation_key;
 			size_t fingerprint = font_effect->GetFingerprint();
 
 			if (!font_effect->HasUniqueTexture())
@@ -238,6 +238,7 @@ bool FontFaceHandleDefault::LoadGlyphsForString(
 			if (!clone)
 				layer_cache[fingerprint] = layer;
 		}
+		*/
 
 		for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
 		{
@@ -247,7 +248,7 @@ bool FontFaceHandleDefault::LoadGlyphsForString(
 			const FontGlyph* const glyph = GetOrAppendGlyph(character, false);
 			if (!glyph)
 				continue;
-			LruListHandle lru_list_handle = glyph_lru_list.add({this, layer_configuration_index, character});
+			LruListHandle lru_list_handle = glyph_lru_list.add({this, layer, character});
 			layer->AddGlyph(this, character, *glyph, sprite_set, lru_list_handle, clone, clone_glyph_origins);
 			++glyph_use_map[character];
 			glyphs_not_in_use.erase(character);
@@ -341,23 +342,44 @@ bool FontFaceHandleDefault::EnsureGlyphs(
 	RMLUI_ASSERT(layer_configuration_index >= 0);
 	RMLUI_ASSERT(layer_configuration_index < (int)layer_configurations.size());
 
-	bool loaded_new_glyphs = false;
 	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
 	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
 	{
 		FontFaceLayer* layer = layer_configuration[layer_index];
+		const FontEffect* font_effect = layer->GetFontEffect();
+		FontFaceLayer* clone = nullptr;
+		/*
+		if (font_effect)
+		{
+			size_t fingerprint = font_effect->GetFingerprint();
+
+			if (!font_effect->HasUniqueTexture())
+			{
+				clone = base_layer;
+			}
+			else
+			{
+				auto cache_iterator = layer_cache.find(fingerprint);
+				if (cache_iterator != layer_cache.end() && cache_iterator->second != layer)
+					clone = cache_iterator->second;
+			}
+		}
+		*/
 		for (auto it_string = StringIteratorU8(string); it_string; ++it_string)
 		{
 			Character character = *it_string;
 			if ((char32_t)character < (char32_t)' ')
 				continue;
 			if (!layer->HasGlyph(character))
-			{
 				all_alive = false;
-			}
 			else
-			{
 				glyph_lru_list.ping(layer->GetLruListHandle(character));
+			if (clone)
+			{
+				if (!clone->HasGlyph(character))
+					all_alive = false;
+				else
+					glyph_lru_list.ping(clone->GetLruListHandle(character));
 			}
 		}
 	}
@@ -366,23 +388,15 @@ bool FontFaceHandleDefault::EnsureGlyphs(
 	return all_alive;
 }
 
-void FontFaceHandleDefault::RemoveGlyph(int layer_configuration_index, Character character, SpriteSet& sprite_set)
+void FontFaceHandleDefault::RemoveGlyph(FontFaceLayer *layer, Character character, SpriteSet& sprite_set)
 {
-	RMLUI_ASSERT(layer_configuration_index >= 0);
-	RMLUI_ASSERT(layer_configuration_index < (int)layer_configurations.size());
-
-	const LayerConfiguration& layer_configuration = layer_configurations[layer_configuration_index];
-	for (size_t layer_index = 0; layer_index < layer_configuration.size(); ++layer_index)
+	layer->RemoveGlyph(character, sprite_set);
+	int& glyph_user_count = glyph_use_map[character];
+	--glyph_user_count;
+	if (glyph_user_count <= 0)
 	{
-		FontFaceLayer* layer = layer_configuration[layer_index];
-		layer->RemoveGlyph(character, sprite_set);
-		int& glyph_user_count = glyph_use_map[character];
-		--glyph_user_count;
-		if (glyph_user_count <= 0)
-		{
-			glyphs.erase(character);
-			glyph_use_map.erase(character);
-		}
+		glyphs.erase(character);
+		glyph_use_map.erase(character);
 	}
 }
 
@@ -580,9 +594,9 @@ bool FontFaceHandleDefault::GenerateLayer(FontFaceLayer* layer)
 		// Determine which, if any, layer the new layer should copy its geometry and textures from.
 		FontFaceLayer* clone = nullptr;
 		bool clone_glyph_origins = true;
-		String generation_key;
 		size_t fingerprint = font_effect->GetFingerprint();
 
+		/*
 		if (!font_effect->HasUniqueTexture())
 		{
 			clone = base_layer;
@@ -594,6 +608,7 @@ bool FontFaceHandleDefault::GenerateLayer(FontFaceLayer* layer)
 			if (cache_iterator != layer_cache.end() && cache_iterator->second != layer)
 				clone = cache_iterator->second;
 		}
+		*/
 
 		// Create a new layer.
 		//result = layer->Generate(this, new_glyphs, clone, clone_glyph_origins);

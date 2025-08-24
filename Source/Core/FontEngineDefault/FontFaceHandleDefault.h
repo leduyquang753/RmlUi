@@ -103,7 +103,7 @@ public:
 
 	bool EnsureGlyphs(StringView string, int layer_configuration, FontProvider::GlyphLruList& glyph_lru_list);
 
-	void RemoveGlyph(int layer_configuration, Character character, SpriteSet& sprite_set);
+	void RemoveGlyph(FontFaceLayer* layer, Character character, SpriteSet& sprite_set);
 
 	/// Version is changed whenever the layers are dirtied, requiring regeneration of string geometry.
 	int GetVersion() const;

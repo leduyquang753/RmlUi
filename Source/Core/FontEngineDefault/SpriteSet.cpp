@@ -59,13 +59,14 @@ SpriteSet::SpriteSet(
 	InitializePool(page_pool);
 	InitializePool(shelf_pool);
 	InitializePool(slot_pool);
+	for (Slot& slot : slot_pool) slot.shelf_index = null_index;
 }
 
 void SpriteSet::Tick()
 {
 	unsigned int changed_pixels = 0;
 	// Try compaction by moving sprites from the last page to the first page.
-	while (changed_pixels <= max_changed_pixels && first_page_index != last_page_index)
+	while (changed_pixels <= max_changed_pixels && page_count > 1)
 	{
 		const Page& source_page = page_pool[last_page_index];
 		unsigned int source_shelf_index = source_page.first_shelf_index;
@@ -108,7 +109,7 @@ void SpriteSet::Tick()
 			source_shelf.first_slot_index = destination_slot_index;
 		if (destination_shelf.first_slot_index == destination_slot_index)
 			destination_shelf.first_slot_index = source_slot_index;
-		destination_slot.epoch = source_slot.epoch;
+		destination_slot.generation = source_slot.generation;
 		std::swap(source_slot, destination_slot);
 		ComputeRenderDataForSlot(source_slot_index);
 
@@ -158,7 +159,7 @@ SpriteSet::Handle SpriteSet::Add(
 		render_data_pool.resize(slot_pool.size());
 	ComputeRenderDataForSlot(slot_index);
 
-	return {slot_index, slot.epoch};
+	return {slot_index, slot.generation};
 }
 
 unsigned int SpriteSet::Allocate(const unsigned int width, const unsigned int height)
@@ -222,7 +223,7 @@ unsigned int SpriteSet::Allocate(const unsigned int width, const unsigned int he
 		0, // actual_index
 		null_index, null_index, // previous_index; next_index
 		null_index, null_index, // previous_free_index; next_free_index
-		0, // epoch
+		slot_pool[slot_index].generation, // generation
 		false // allocated
 	};
 	shelf_pool[shelf_index] = {
@@ -275,82 +276,79 @@ unsigned int SpriteSet::TryAllocateInPage(const unsigned int page_index, const u
 	}
 	if (selected_slot_index == null_index)
 		return null_index;
-	Shelf* shelf = &shelf_pool[selected_shelf_index];
-	if (!shelf->allocated)
+	Shelf& shelf = shelf_pool[selected_shelf_index];
+	if (!shelf.allocated)
 	{
-		shelf->allocated = true;
-		if (shelf->height - height >= split_threshold)
+		shelf.allocated = true;
+		if (shelf.height - height >= split_threshold)
 		{
 			const unsigned int new_shelf_index = AllocateEntry<Shelf>(shelf_pool, next_free_shelf_index);
 			const unsigned int new_slot_index = AllocateEntry<Slot>(slot_pool, next_free_slot_index);
-			shelf = &shelf_pool[selected_shelf_index];
 			slot_pool[new_slot_index] = {
 				new_shelf_index,
 				page.texture_id,
-				0, shelf->y + height, // x; y
+				0, shelf.y + height, // x; y
 				page_size, 0, // width; height
 				0, // actual_width
 				null_index, null_index, // previous_index; next_index
 				null_index, null_index, // previous_free_index; next_free_index
-				0, // epoch
+				slot_pool[new_slot_index].generation, // generation
 				false // allocated
 			};
 			shelf_pool[new_shelf_index] = {
 				page_index,
-				shelf->y + height, shelf->height - height, // y; height
-				selected_shelf_index, shelf->next_index, // previous_index; next_index
+				shelf.y + height, shelf.height - height, // y; height
+				selected_shelf_index, shelf.next_index, // previous_index; next_index
 				new_slot_index, // first_slot_index
 				new_slot_index, // first_free_slot_index
 				false // allocated
 			};
-			if (shelf->next_index != null_index)
-				shelf_pool[shelf->next_index].previous_index = new_shelf_index;
-			shelf->next_index = new_shelf_index;
-			shelf->height = height;
+			if (shelf.next_index != null_index)
+				shelf_pool[shelf.next_index].previous_index = new_shelf_index;
+			shelf.next_index = new_shelf_index;
+			shelf.height = height;
 		}
 	}
-	Slot* slot = &slot_pool[selected_slot_index];
-	if (slot->width - width >= split_threshold)
+	Slot& slot = slot_pool[selected_slot_index];
+	if (slot.width - width >= split_threshold)
 	{
 		const unsigned int new_slot_index = AllocateEntry<Slot>(slot_pool, next_free_slot_index);
-		slot = &slot_pool[selected_slot_index];
 		slot_pool[new_slot_index] = {
 			selected_shelf_index,
 			page.texture_id,
-			slot->x + width, shelf->y, // x; y
-			slot->width - width, 0, // width; height
+			slot.x + width, shelf.y, // x; y
+			slot.width - width, 0, // width; height
 			0, // actual_width
-			selected_slot_index, slot->next_index, // previous_index; next_index
-			slot->previous_free_index, slot->next_free_index, // previous_free_index; next_free_index
-			0, // epoch
+			selected_slot_index, slot.next_index, // previous_index; next_index
+			slot.previous_free_index, slot.next_free_index, // previous_free_index; next_free_index
+			slot_pool[new_slot_index].generation, // generation
 			false // allocated
 		};
-		if (slot->next_index != null_index)
-			slot_pool[slot->next_index].previous_index = new_slot_index;
-		slot->next_index = new_slot_index;
-		if (slot->previous_free_index == null_index)
-			shelf->first_free_slot_index = new_slot_index;
+		if (slot.next_index != null_index)
+			slot_pool[slot.next_index].previous_index = new_slot_index;
+		slot.next_index = new_slot_index;
+		if (slot.previous_free_index == null_index)
+			shelf.first_free_slot_index = new_slot_index;
 		else
-			slot_pool[slot->previous_free_index].next_free_index = new_slot_index;
-		if (slot->next_free_index != null_index)
-			slot_pool[slot->next_free_index].previous_free_index = new_slot_index;
-		slot->width = width;
+			slot_pool[slot.previous_free_index].next_free_index = new_slot_index;
+		if (slot.next_free_index != null_index)
+			slot_pool[slot.next_free_index].previous_free_index = new_slot_index;
+		slot.width = width;
 	}
 	else
 	{
-		if (slot->previous_free_index == null_index)
-			shelf->first_free_slot_index = slot->next_free_index;
+		if (slot.previous_free_index == null_index)
+			shelf.first_free_slot_index = slot.next_free_index;
 		else
-			slot_pool[slot->previous_free_index].next_free_index = slot->next_free_index;
-		if (slot->next_free_index != null_index)
-			slot_pool[slot->next_free_index].previous_free_index = slot->previous_free_index;
+			slot_pool[slot.previous_free_index].next_free_index = slot.next_free_index;
+		if (slot.next_free_index != null_index)
+			slot_pool[slot.next_free_index].previous_free_index = slot.previous_free_index;
 	}
-	slot->allocated = true;
-	slot->actual_width = width;
-	slot->height = height;
-	slot->epoch = current_epoch;
+	slot.allocated = true;
+	slot.actual_width = width;
+	slot.height = height;
 	if (page_index == first_page_index)
-		first_page_allocated_pixels += width * shelf->height;
+		first_page_allocated_pixels += width * shelf.height;
 	return selected_slot_index;
 }
 
@@ -388,14 +386,20 @@ unsigned int SpriteSet::Remove(const unsigned int slot_index)
 		slot_pool[shelf.first_free_slot_index].previous_free_index = slot_index;
 	}
 	shelf.first_free_slot_index = slot_index;
-	++slot.epoch;
+	++slot.generation;
 
 	// Merge consecutive empty slots.
+	Slot slot_copy = slot;
+	Slot next_slot_copy = {null_index};
+	Slot previous_slot_copy = {null_index};
+	unsigned int next_slot_index = null_index;
 	if (slot.next_index != null_index)
 	{
 		Slot& next_slot = slot_pool[slot.next_index];
+		next_slot_copy = next_slot;
 		if (!next_slot.allocated)
 		{
+			next_slot_index = slot.next_index;
 			slot.width += next_slot.width;
 			const unsigned int next_index = slot.next_index;
 			slot.next_index = next_slot.next_index;
@@ -411,6 +415,7 @@ unsigned int SpriteSet::Remove(const unsigned int slot_index)
 	if (slot.previous_index != null_index)
 	{
 		Slot& previous_slot = slot_pool[slot.previous_index];
+		previous_slot_copy = previous_slot;
 		if (!previous_slot.allocated)
 		{
 			slot.x -= previous_slot.width;
@@ -491,18 +496,19 @@ unsigned int SpriteSet::Remove(const unsigned int slot_index)
 void SpriteSet::Remove(const Handle handle)
 {
 	Slot& slot = slot_pool[handle.slot_index];
-	if (slot.epoch != handle.epoch)
+	if (slot.generation != handle.generation)
 		return;
 	Remove(handle.slot_index);
 }
 
 bool SpriteSet::IsValid(const Handle handle) const
 {
-	return slot_pool[handle.slot_index].epoch == handle.epoch;
+	return slot_pool[handle.slot_index].generation == handle.generation;
 }
 
 SpriteSet::SpriteInfo SpriteSet::GetInfo(const Handle handle) const
 {
+	RMLUI_ASSERT(slot_pool[handle.slot_index].generation == handle.generation);
 	const Slot& slot = slot_pool[handle.slot_index];
 	return {
 		slot.texture_id,
@@ -513,6 +519,7 @@ SpriteSet::SpriteInfo SpriteSet::GetInfo(const Handle handle) const
 
 SpriteSet::SpriteRenderData SpriteSet::GetRenderData(const Handle handle) const
 {
+	RMLUI_ASSERT(slot_pool[handle.slot_index].generation == handle.generation);
 	return render_data_pool[handle.slot_index];
 }
 

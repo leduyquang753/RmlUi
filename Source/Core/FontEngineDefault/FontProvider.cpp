@@ -77,14 +77,14 @@ void FontProvider::OnBeginFrame()
 
 void FontProvider::OnBeginFrameInternal()
 {
-	//.sprite_set.Tick();
+	sprite_set.Tick();
 	for (auto iterator = font_families.begin(); iterator != font_families.end(); ++iterator)
 		iterator->second->OnBeginFrame();
 	glyph_lru_list.tick();
 	while (glyph_lru_list.getLastEntryAge() > 600)
 	{
 		const auto& entry = *glyph_lru_list.getLast();
-		entry.font_face->RemoveGlyph(entry.font_effects_handle, entry.character, sprite_set);
+		entry.font_face->RemoveGlyph(entry.layer, entry.character, sprite_set);
 		glyph_lru_list.evictLast();
 	}
 }

@@ -93,7 +93,7 @@ public:
 		if (it == character_boxes.end())
 			return;
 		const CharacterBox& box = it->second;
-		if (!sprite_set.IsValid(box.sprite_set_handle))
+		if (!box.has_texture || !sprite_set.IsValid(box.sprite_set_handle))
 			return;
 
 		// Generate the geometry for the character.
@@ -124,6 +124,7 @@ private:
 
 		// The texture this character renders from.
 		//int texture_index = -1;
+		bool has_texture;
 		SpriteSet::Handle sprite_set_handle;
 		LruListHandle lru_list_handle;
 	};
